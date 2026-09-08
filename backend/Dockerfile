@@ -16,6 +16,8 @@ COPY . .
 
 # Hugging Face Spaces (Docker SDK) always sends traffic to port 7860
 ENV PORT=7860
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
 EXPOSE 7860
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]

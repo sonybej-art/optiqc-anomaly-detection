@@ -6,6 +6,7 @@ import gc
 import os
 import shutil
 import torch
+import faiss
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
@@ -13,11 +14,11 @@ import torchvision.models as models
 import urllib.request
 from PIL import Image
 import numpy as np
-import faiss
 from scipy.ndimage import gaussian_filter
 
 
 torch.set_num_threads(1)
+faiss.omp_set_num_threads(1)
 
 
 class SquarePad:
@@ -57,6 +58,10 @@ class AnomalyInferenceEngine:
 
         # Faiss index & EVT thresholds
         self.index = ckpt['memory_bank_index']
+        print(
+            f"Memory bank: {self.index.ntotal} vectors, dim={self.index.d} "
+            f"(~{self.index.ntotal * self.index.d * 4 / 1024**2:.1f} MB resident)"
+        )
         self.image_threshold = float(ckpt.get('image_threshold', 0.2036))
         self.pixel_threshold = float(ckpt.get('pixel_threshold', 0.2036))
         gc.collect()
@@ -87,6 +92,15 @@ class AnomalyInferenceEngine:
         del f1, f2, f1_resized
         return patches
 
+    def _chunked_search(self, queries: np.ndarray, k: int = 1, chunk_size: int = 32) -> np.ndarray:
+        n = queries.shape[0]
+        out = np.empty((n, k), dtype=np.float32)
+        for start in range(0, n, chunk_size):
+            end = min(start + chunk_size, n)
+            d, _ = self.index.search(queries[start:end], k)
+            out[start:end] = d
+        return out
+
     @torch.inference_mode()
     def inspect_image(self, image_bytes: bytes, custom_threshold: float = None):
         t0 = time.perf_counter()
@@ -103,7 +117,7 @@ class AnomalyInferenceEngine:
         del tensor, patches
 
         # 2. Faiss nearest-neighbor search
-        distances, _ = self.index.search(patch_vectors, 1)
+        distances = self._chunked_search(patch_vectors, k=1, chunk_size=32)
         distances = np.sqrt(distances, dtype=np.float32)
         del patch_vectors
 
