@@ -1,17 +1,22 @@
 import io
 import time
 import base64
+import gc
 import os
-import urllib.request
+import shutil
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 import torchvision.models as models
+import urllib.request
 from PIL import Image
 import numpy as np
 import faiss
 from scipy.ndimage import gaussian_filter
+
+
+torch.set_num_threads(1)
 
 
 class SquarePad:
@@ -34,14 +39,15 @@ class AnomalyInferenceEngine:
         if not os.path.exists(checkpoint_path):
             hf_url = "https://huggingface.co/javito3/optiqc-bottle-weights/resolve/main/bottle_inspector_v2.pth"
             print(f"Downloading checkpoint from {hf_url}...")
-            urllib.request.urlretrieve(hf_url, checkpoint_path)
+            with urllib.request.urlopen(hf_url) as response, open(checkpoint_path, "wb") as checkpoint_file:
+                shutil.copyfileobj(response, checkpoint_file, length=1024 * 1024)
             print("Download complete.")
 
         print(f"Loading weights from {checkpoint_path}...")
         # weights_only=False is required here because the checkpoint bundles a
         # non-tensor object (the FAISS memory-bank index) alongside the state dict.
         # Only do this for checkpoints you trust / produced yourself.
-        ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+        ckpt = torch.load(checkpoint_path, map_location="cpu", mmap=True, weights_only=False)
 
         # WideResNet-50 backbone
         self.backbone = models.wide_resnet50_2(weights=None)
@@ -52,6 +58,7 @@ class AnomalyInferenceEngine:
         self.index = ckpt['memory_bank_index']
         self.image_threshold = float(ckpt.get('image_threshold', 0.2036))
         self.pixel_threshold = float(ckpt.get('pixel_threshold', 0.2036))
+        gc.collect()
 
         # Forward hooks for Layer 2 & Layer 3
         self.features = []
