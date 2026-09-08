@@ -41,7 +41,7 @@ except FileNotFoundError:
     raise
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def health_check():
     """Root health check — also used by index.html on load to confirm the
     backend is reachable and to pull the calibrated threshold."""
