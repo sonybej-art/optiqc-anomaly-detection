@@ -75,17 +75,23 @@ class AnomalyInferenceEngine:
         ])
         print(f"Engine online. Calibrated EVT decision boundary: {self.image_threshold:.4f}")
 
+    @torch.inference_mode()
     def _extract_patches(self, x: torch.Tensor):
         self.features = []
-        with torch.no_grad():
-            _ = self.backbone(x)
+        _ = self.backbone(x)
         f1, f2 = self.features[0], self.features[1]
         f1_resized = F.interpolate(f1, size=f2.shape[-2:], mode="bilinear", align_corners=False)
-        return torch.cat([f1_resized, f2], dim=1)
+        patches = torch.cat([f1_resized, f2], dim=1)
+        self.features.clear()
+        del f1, f2, f1_resized
+        return patches
 
+    @torch.inference_mode()
     def inspect_image(self, image_bytes: bytes, custom_threshold: float = None):
         t0 = time.perf_counter()
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        img = Image.open(io.BytesIO(image_bytes))
+        img.thumbnail((256, 256), Image.Resampling.LANCZOS)
+        img = img.convert("RGB")
         tensor = self.transform(img).unsqueeze(0).to(self.device)
 
         # 1. Feature extraction
@@ -113,6 +119,10 @@ class AnomalyInferenceEngine:
         buffer = io.BytesIO()
         heatmap_img.save(buffer, format="PNG")
         encoded_mask = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+        del tensor, patches, patch_vectors, distances, map_tensor, upscaled_map
+        del anomaly_map, norm_map, heatmap_uint8, heatmap_img, buffer
+        gc.collect()
 
         threshold = custom_threshold if custom_threshold is not None else self.image_threshold
         is_defective = bool(image_score > threshold)
