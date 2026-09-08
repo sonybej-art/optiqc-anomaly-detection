@@ -1,6 +1,7 @@
 import io
 import time
 import base64
+import ctypes
 import gc
 import os
 import shutil
@@ -96,39 +97,50 @@ class AnomalyInferenceEngine:
 
         # 1. Feature extraction
         patches = self._extract_patches(tensor)
-        B, C, H, W = patches.shape
-        patch_vectors = patches.permute(0, 2, 3, 1).reshape(-1, C).cpu().numpy().astype(np.float32)
+        _, C, H, W = patches.shape
+        patch_vectors = patches.permute(0, 2, 3, 1).reshape(-1, C)
+        patch_vectors = patch_vectors.to(dtype=torch.float32).cpu().numpy()
+        del tensor, patches
 
         # 2. Faiss nearest-neighbor search
         distances, _ = self.index.search(patch_vectors, 1)
-        distances = np.sqrt(distances)
+        distances = np.sqrt(distances, dtype=np.float32)
+        del patch_vectors
 
         # 3. Anomaly scoring & heatmap generation
         patch_scores = distances.reshape(H, W)
         image_score = float(np.max(patch_scores))
 
         smooth_map = gaussian_filter(patch_scores, sigma=4)
-        map_tensor = torch.tensor(smooth_map).unsqueeze(0).unsqueeze(0)
-        upscaled_map = F.interpolate(map_tensor, size=(256, 256), mode="bilinear", align_corners=False)
-        anomaly_map = upscaled_map.squeeze().numpy()
+        del distances, patch_scores
 
-        norm_map = (anomaly_map - anomaly_map.min()) / (anomaly_map.max() - anomaly_map.min() + 1e-8)
-        heatmap_uint8 = (norm_map * 255).astype(np.uint8)
+        norm_map = (smooth_map - smooth_map.min()) / (smooth_map.max() - smooth_map.min() + 1e-8)
+        map_uint8 = np.clip(norm_map * 255, 0, 255).astype(np.uint8)
+        del smooth_map, norm_map
 
-        heatmap_img = Image.fromarray(heatmap_uint8).resize(img.size, Image.BILINEAR)
+        resized_map = np.asarray(
+            Image.fromarray(map_uint8).resize((256, 256), Image.BILINEAR),
+            dtype=np.uint8,
+        )
+        del map_uint8
+
+        colormap = np.empty((256, 3), dtype=np.uint8)
+        colormap[:, 0] = np.minimum(255, resized_map.astype(np.uint16) * 2)
+        colormap[:, 1] = np.minimum(255, resized_map.astype(np.uint16) * 2)
+        colormap[:, 2] = 255 - resized_map
+        heatmap_img = Image.fromarray(colormap[resized_map], mode="RGB")
+        del resized_map, colormap
+
         buffer = io.BytesIO()
         heatmap_img.save(buffer, format="PNG")
         encoded_mask = base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-        del tensor, patches, patch_vectors, distances, map_tensor, upscaled_map
-        del anomaly_map, norm_map, heatmap_uint8, heatmap_img, buffer
-        gc.collect()
+        del heatmap_img, buffer, img
 
         threshold = custom_threshold if custom_threshold is not None else self.image_threshold
         is_defective = bool(image_score > threshold)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
-        return {
+        result = {
             "image_score": round(image_score, 4),
             "threshold": round(threshold, 4),
             "is_defective": is_defective,
@@ -136,3 +148,10 @@ class AnomalyInferenceEngine:
             "latency_ms": round(latency_ms, 2),
             "heatmap_base64": encoded_mask
         }
+
+        gc.collect()
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
+        return result
