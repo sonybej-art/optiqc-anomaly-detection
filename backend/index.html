@@ -441,14 +441,14 @@
     form.append('file', currentFile);
     if(thresholdInput.value !== '') form.append('threshold', thresholdInput.value);
 
-    fetch(apiBase() + '/api/v1/inspect', { method:'POST', body: form })
+    fetch('/api/v1/inspect', { method:'POST', body: form })
       .then(r => {
         if(!r.ok) throw new Error('API returned ' + r.status);
         return r.json();
       })
       .then(updateResults)
       .catch(err => {
-        showError('Couldn\'t reach the inspection API (' + err.message + '). Make sure the FastAPI server is running at ' + apiBase() + ', and that this page is open over http:// rather than saved as a local file.');
+        showError('Couldn\'t reach the inspection API (' + err.message + '). Make sure the FastAPI server is running on this origin, and that this page is open over http:// rather than saved as a local file.');
       })
       .finally(() => {
         inspectBtn.disabled = false;
