@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.pth
+backend/weights/*.pth
+.pytest_cache/
+.DS_Store
+.ipynb_checkpoints/
