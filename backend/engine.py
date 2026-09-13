@@ -158,11 +158,12 @@ class AnomalyInferenceEngine:
         del map_uint8
 
         colormap = np.empty((256, 3), dtype=np.uint8)
-        colormap[:, 0] = np.minimum(255, resized_map.astype(np.uint16) * 2)
-        colormap[:, 1] = np.minimum(255, resized_map.astype(np.uint16) * 2)
-        colormap[:, 2] = 255 - resized_map
+        gradient = np.arange(256, dtype=np.uint16)
+        colormap[:, 0] = np.minimum(255, gradient * 2)
+        colormap[:, 1] = np.minimum(255, gradient * 2)
+        colormap[:, 2] = 255 - gradient
         heatmap_img = Image.fromarray(colormap[resized_map], mode="RGB")
-        del resized_map, colormap
+        del resized_map, colormap, gradient
 
         buffer = io.BytesIO()
         heatmap_img.save(buffer, format="PNG")
