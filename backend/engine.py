@@ -5,6 +5,10 @@ import ctypes
 import gc
 import logging
 import os
+try:
+    import resource
+except ImportError:
+    resource = None
 import shutil
 import torch
 import faiss
@@ -22,6 +26,15 @@ logger = logging.getLogger(__name__)
 
 torch.set_num_threads(1)
 faiss.omp_set_num_threads(1)
+
+
+def _rss_mb() -> float:
+    try:
+        if resource is None or os.name == "nt":
+            return -1.0
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    except Exception:
+        return -1.0
 
 
 class SquarePad:
@@ -120,15 +133,16 @@ class AnomalyInferenceEngine:
     @torch.inference_mode()
     def inspect_image(self, image_bytes: bytes, custom_threshold: float = None):
         t0 = time.perf_counter()
+        print(f"STAGE: inspect_image start | rss={_rss_mb():.1f}MB", flush=True)
         img = Image.open(io.BytesIO(image_bytes))
         img.thumbnail((256, 256), Image.Resampling.LANCZOS)
         img = img.convert("RGB")
         tensor = self.transform(img).unsqueeze(0).to(self.device)
-        print("STAGE: preprocessed", flush=True)
+        print(f"STAGE: preprocessed | rss={_rss_mb():.1f}MB", flush=True)
 
         # 1. Feature extraction
         patches = self._extract_patches(tensor)
-        print("STAGE: features extracted", flush=True)
+        print(f"STAGE: features extracted | rss={_rss_mb():.1f}MB", flush=True)
         _, C, H, W = patches.shape
         patch_vectors = patches.permute(0, 2, 3, 1).reshape(-1, C)
         patch_vectors = patch_vectors.to(dtype=torch.float32).cpu().numpy()
@@ -136,7 +150,7 @@ class AnomalyInferenceEngine:
 
         # 2. Faiss nearest-neighbor search
         distances = self._chunked_search(patch_vectors, k=1, chunk_size=32)
-        print("STAGE: faiss search done", flush=True)
+        print(f"STAGE: faiss search done | rss={_rss_mb():.1f}MB", flush=True)
         distances = np.sqrt(distances, dtype=np.float32)
         del patch_vectors
 
@@ -168,7 +182,7 @@ class AnomalyInferenceEngine:
         buffer = io.BytesIO()
         heatmap_img.save(buffer, format="PNG")
         encoded_mask = base64.b64encode(buffer.getvalue()).decode("utf-8")
-        print("STAGE: heatmap encoded", flush=True)
+        print(f"STAGE: heatmap encoded | rss={_rss_mb():.1f}MB", flush=True)
         del heatmap_img, buffer, img
 
         threshold = custom_threshold if custom_threshold is not None else self.image_threshold
