@@ -3,6 +3,7 @@ import time
 import base64
 import ctypes
 import gc
+import logging
 import os
 import shutil
 import torch
@@ -16,6 +17,8 @@ from PIL import Image
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
+
+logger = logging.getLogger(__name__)
 
 torch.set_num_threads(1)
 faiss.omp_set_num_threads(1)
@@ -69,6 +72,12 @@ class AnomalyInferenceEngine:
         except (TypeError, AttributeError):
             pass
         print(f"Memory bank loaded. Vectors: {total_vectors}, Dim: {dimension}")
+        try:
+            probe_queries = np.random.rand(4, self.index.d).astype("float32")
+            probe_distances, _ = self.index.search(probe_queries, 1)
+            print(f"FAISS self-test OK: {probe_distances.flatten()[:2]}", flush=True)
+        except Exception:
+            logger.exception("FAISS self-test failed")
         self.image_threshold = float(ckpt.get('image_threshold', 0.2036))
         self.pixel_threshold = float(ckpt.get('pixel_threshold', 0.2036))
         gc.collect()
@@ -115,9 +124,11 @@ class AnomalyInferenceEngine:
         img.thumbnail((256, 256), Image.Resampling.LANCZOS)
         img = img.convert("RGB")
         tensor = self.transform(img).unsqueeze(0).to(self.device)
+        print("STAGE: preprocessed", flush=True)
 
         # 1. Feature extraction
         patches = self._extract_patches(tensor)
+        print("STAGE: features extracted", flush=True)
         _, C, H, W = patches.shape
         patch_vectors = patches.permute(0, 2, 3, 1).reshape(-1, C)
         patch_vectors = patch_vectors.to(dtype=torch.float32).cpu().numpy()
@@ -125,6 +136,7 @@ class AnomalyInferenceEngine:
 
         # 2. Faiss nearest-neighbor search
         distances = self._chunked_search(patch_vectors, k=1, chunk_size=32)
+        print("STAGE: faiss search done", flush=True)
         distances = np.sqrt(distances, dtype=np.float32)
         del patch_vectors
 
@@ -155,6 +167,7 @@ class AnomalyInferenceEngine:
         buffer = io.BytesIO()
         heatmap_img.save(buffer, format="PNG")
         encoded_mask = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        print("STAGE: heatmap encoded", flush=True)
         del heatmap_img, buffer, img
 
         threshold = custom_threshold if custom_threshold is not None else self.image_threshold

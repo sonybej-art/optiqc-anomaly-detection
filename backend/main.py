@@ -1,5 +1,8 @@
+import faulthandler
 import logging
 import os
+
+faulthandler.enable()
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
