@@ -58,9 +58,10 @@ class AnomalyInferenceEngine:
 
         # Faiss index & EVT thresholds
         self.index = ckpt['memory_bank_index']
+        total_vectors = getattr(self.index, "ntotal", None)
+        dimension = getattr(self.index, "d", None)
         print(
-            f"Memory bank: {self.index.ntotal} vectors, dim={self.index.d} "
-            f"(~{self.index.ntotal * self.index.d * 4 / 1024**2:.1f} MB resident)"
+            f"Memory bank loaded successfully. Vectors: {total_vectors}, Dim: {dimension}"
         )
         self.image_threshold = float(ckpt.get('image_threshold', 0.2036))
         self.pixel_threshold = float(ckpt.get('pixel_threshold', 0.2036))
